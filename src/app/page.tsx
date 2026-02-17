@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useCheckout } from "@moneydevkit/nextjs";
 
 type Mode = "search" | "topic" | "account" | "ask";
 
@@ -32,7 +33,7 @@ const modes: { id: Mode; label: string; icon: string; desc: string }[] = [
 ];
 
 export default function HomePage() {
-  // Server-side checkout creation (no useCheckout hook)
+  const { createCheckout, isLoading } = useCheckout();
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [handle, setHandle] = useState("");
@@ -40,50 +41,46 @@ export default function HomePage() {
   const [side2, setSide2] = useState("");
   const [topics, setTopics] = useState("");
   const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleResearch = async () => {
     setError("");
-    setLoading(true);
 
-    try {
-      // Build metadata for the research request
-      const metadata: Record<string, string> = { mode };
-      if (mode === "search") metadata.query = query;
-      if (mode === "topic") {
-        metadata.query = query;
-        metadata.side1 = side1;
-        metadata.side2 = side2;
-      }
-      if (mode === "account") {
-        metadata.handle = handle;
-        metadata.topics = topics;
-      }
-      if (mode === "ask") {
-        metadata.handle = handle;
-        metadata.question = question;
-      }
-
-      const res = await fetch("/api/create-checkout", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(metadata),
-      });
-
-      const result = await res.json();
-
-      if (!res.ok || result.error) {
-        setError(result.error || "Failed to create checkout");
-        setLoading(false);
-        return;
-      }
-
-      window.location.href = result.data.checkoutUrl;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
-      setLoading(false);
+    // Build metadata for the research request
+    const metadata: Record<string, string> = { mode };
+    if (mode === "search") metadata.query = query;
+    if (mode === "topic") {
+      metadata.query = query;
+      metadata.side1 = side1;
+      metadata.side2 = side2;
     }
+    if (mode === "account") {
+      metadata.handle = handle;
+      metadata.topics = topics;
+    }
+    if (mode === "ask") {
+      metadata.handle = handle;
+      metadata.question = question;
+    }
+
+    const successUrl = `/results?${new URLSearchParams(metadata).toString()}`;
+
+    const result = await createCheckout({
+      type: "AMOUNT",
+      amount: 1000,
+      title: "X-Ray Research Report",
+      description: `AI-powered X/Twitter ${mode} report`,
+      currency: "SAT",
+      successUrl,
+      metadata,
+    });
+
+    if (result.error) {
+      setError(result.error.message || "Failed to create checkout");
+      return;
+    }
+
+    window.location.href = result.data.checkoutUrl;
   };
 
   const isValid = () => {
@@ -263,10 +260,10 @@ export default function HomePage() {
 
           <button
             onClick={handleResearch}
-            disabled={!isValid() || loading}
+            disabled={!isValid() || isLoading}
             className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
-            {loading ? (
+            {isLoading ? (
               <span>Creating checkout…</span>
             ) : (
               <>

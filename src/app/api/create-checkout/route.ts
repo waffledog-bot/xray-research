@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { callMdk } from "@/lib/mdk";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type MdkCheckout = {
   id: string;
