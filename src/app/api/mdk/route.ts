@@ -1,2 +1,2 @@
 export const maxDuration = 60;
-export { POST } from "@moneydevkit/nextjs/server/route";
+export { GET, POST } from "@moneydevkit/nextjs/server/route";

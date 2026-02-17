@@ -1,6 +1,5 @@
 "use client";
 
-import { useCheckout } from "@moneydevkit/nextjs";
 import { useState } from "react";
 
 type Mode = "search" | "topic" | "account" | "ask";
@@ -33,7 +32,7 @@ const modes: { id: Mode; label: string; icon: string; desc: string }[] = [
 ];
 
 export default function HomePage() {
-  const { createCheckout } = useCheckout();
+  // Server-side checkout creation (no useCheckout hook)
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [handle, setHandle] = useState("");
@@ -66,18 +65,16 @@ export default function HomePage() {
         metadata.question = question;
       }
 
-      const result = await createCheckout({
-        type: "AMOUNT",
-        title: `X-Ray ${modes.find((m) => m.id === mode)?.label} Report`,
-        description: `AI-powered X/Twitter research report`,
-        amount: 1000,
-        currency: "SAT",
-        successUrl: `/results?${new URLSearchParams(metadata).toString()}`,
-        metadata,
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(metadata),
       });
 
-      if (result.error) {
-        setError(result.error.message);
+      const result = await res.json();
+
+      if (!res.ok || result.error) {
+        setError(result.error || "Failed to create checkout");
         setLoading(false);
         return;
       }
