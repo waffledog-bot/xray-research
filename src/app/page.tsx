@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useCheckout } from "@moneydevkit/nextjs";
+import { useRouter } from "next/navigation";
 
 type Mode = "search" | "topic" | "account" | "ask";
 
@@ -33,7 +33,7 @@ const modes: { id: Mode; label: string; icon: string; desc: string }[] = [
 ];
 
 export default function HomePage() {
-  const { createCheckout, isLoading } = useCheckout();
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [handle, setHandle] = useState("");
@@ -42,51 +42,50 @@ export default function HomePage() {
   const [topics, setTopics] = useState("");
   const [question, setQuestion] = useState("");
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleResearch = async () => {
     setError("");
+    setIsLoading(true);
 
-    // Build metadata for the research request
-    const metadata: Record<string, string> = { mode };
-    if (mode === "search") metadata.query = query;
+    const params: Record<string, string> = { mode };
+    if (mode === "search") params.query = query;
     if (mode === "topic") {
-      metadata.query = query;
-      metadata.side1 = side1;
-      metadata.side2 = side2;
+      params.query = query;
+      params.side1 = side1;
+      params.side2 = side2;
     }
     if (mode === "account") {
-      metadata.handle = handle;
-      metadata.topics = topics;
+      params.handle = handle;
+      params.topics = topics;
     }
     if (mode === "ask") {
-      metadata.handle = handle;
-      metadata.question = question;
+      params.handle = handle;
+      params.question = question;
     }
 
-    const successUrl = `/results?${new URLSearchParams(metadata).toString()}`;
-
-    const result = await createCheckout({
-      type: "AMOUNT",
-      amount: 1000,
-      title: "X-Ray Research Report",
-      description: `AI-powered X/Twitter ${mode} report`,
-      currency: "SAT",
-      successUrl,
-      metadata,
-    });
-
-    if (result.error) {
-      setError(result.error.message || "Failed to create checkout");
-      return;
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      router.push(`/checkout/${data.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create checkout");
+    } finally {
+      setIsLoading(false);
     }
-
-    window.location.href = result.data.checkoutUrl;
   };
 
   const isValid = () => {
     if (mode === "search") return query.trim().length > 0;
-    if (mode === "topic")
-      return query.trim() && side1.trim() && side2.trim();
+    if (mode === "topic") return query.trim() && side1.trim() && side2.trim();
     if (mode === "account") return handle.trim() && topics.trim();
     if (mode === "ask") return handle.trim() && question.trim();
     return false;
@@ -254,9 +253,7 @@ export default function HomePage() {
             </>
           )}
 
-          {error && (
-            <p className="text-red-400 text-sm">{error}</p>
-          )}
+          {error && <p className="text-red-400 text-sm">{error}</p>}
 
           <button
             onClick={handleResearch}
@@ -264,7 +261,7 @@ export default function HomePage() {
             className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             {isLoading ? (
-              <span>Creating checkout…</span>
+              <span>Creating invoice…</span>
             ) : (
               <>
                 <span>⚡</span>

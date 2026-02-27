@@ -1,5 +1,7 @@
-import withMdkCheckout from "@moneydevkit/nextjs/next-plugin";
+import type { NextConfig } from "next";
 
-const nextConfig = {};
+const nextConfig: NextConfig = {
+  serverExternalPackages: ["better-sqlite3"],
+};
 
-export default withMdkCheckout(nextConfig);
+export default nextConfig;

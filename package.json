@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@moneydevkit/nextjs": "^0.11.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.6.2",
+    "bolt11": "^1.4.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
