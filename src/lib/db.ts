@@ -22,9 +22,13 @@ function getBlobBaseUrl(): string {
 }
 
 // Fetch a blob directly by pathname — avoids list() which has eventual consistency lag.
+// We bypass Next.js cache with no-store, and bypass CDN cache with Cache-Control header.
 async function fetchBlob(pathname: string): Promise<Response> {
   const url = `${getBlobBaseUrl()}/${pathname}`;
-  return fetch(url, { cache: "no-store" });
+  return fetch(url, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache, no-store" },
+  });
 }
 
 async function putJson(pathname: string, data: unknown): Promise<void> {
@@ -35,16 +39,58 @@ async function putJson(pathname: string, data: unknown): Promise<void> {
   });
 }
 
+async function putSignal(pathname: string): Promise<void> {
+  await put(pathname, "ok", {
+    access: "public",
+    addRandomSuffix: false,
+    contentType: "text/plain",
+  });
+}
+
+// ── Schema (immutable/append-only — blobs are NEVER overwritten) ─────────────
+//
+//   sessions/{id}.json          – written once on create (meta + bolt11 + params)
+//   payment-hash/{hash}         – written once on create (→ session id)
+//   sessions/{id}/paid          – signal blob, written when payment received
+//   sessions/{id}/complete.json – written when research finishes (contains result_html)
+//   sessions/{id}/failed        – signal blob, written if research fails
+//
+// Immutable writes mean we never have to invalidate CDN cache.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function createSession(session: Session): Promise<void> {
-  await putJson(`sessions/${session.id}.json`, session);
-  // Reverse lookup: payment_hash → session id (for webhook correlation)
+  await putJson(`sessions/${session.id}.json`, {
+    id: session.id,
+    params: session.params,
+    payment_hash: session.payment_hash,
+    bolt11: session.bolt11,
+    created_at: session.created_at,
+  });
   await putJson(`payment-hash/${session.payment_hash}`, session.id);
 }
 
 export async function getSession(id: string): Promise<Session | null> {
-  const res = await fetchBlob(`sessions/${id}.json`);
-  if (!res.ok) return null;
-  return res.json();
+  // Fetch meta and all status signals in parallel for speed.
+  const [metaRes, completeRes, failedRes, paidRes] = await Promise.all([
+    fetchBlob(`sessions/${id}.json`),
+    fetchBlob(`sessions/${id}/complete.json`),
+    fetchBlob(`sessions/${id}/failed`),
+    fetchBlob(`sessions/${id}/paid`),
+  ]);
+
+  if (!metaRes.ok) return null; // session doesn't exist
+
+  const meta = (await metaRes.json()) as Omit<Session, "status" | "result_html">;
+
+  if (completeRes.ok) {
+    const { result_html } = (await completeRes.json()) as {
+      result_html: string;
+    };
+    return { ...meta, status: "complete", result_html };
+  }
+  if (failedRes.ok) return { ...meta, status: "failed" };
+  if (paidRes.ok) return { ...meta, status: "paid" };
+  return { ...meta, status: "pending" };
 }
 
 export async function getSessionByPaymentHash(
@@ -56,11 +102,18 @@ export async function getSessionByPaymentHash(
   return getSession(id);
 }
 
-export async function updateSession(
+// Instead of overwriting, write a new status signal blob.
+export async function markPaid(id: string): Promise<void> {
+  await putSignal(`sessions/${id}/paid`);
+}
+
+export async function markComplete(
   id: string,
-  updates: Partial<Session>
+  result_html: string
 ): Promise<void> {
-  const session = await getSession(id);
-  if (!session) return;
-  await putJson(`sessions/${id}.json`, { ...session, ...updates });
+  await putJson(`sessions/${id}/complete.json`, { result_html });
+}
+
+export async function markFailed(id: string): Promise<void> {
+  await putSignal(`sessions/${id}/failed`);
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionByPaymentHash, updateSession } from "@/lib/db";
+import { getSessionByPaymentHash, markPaid, markComplete, markFailed } from "@/lib/db";
 import { generateResearch } from "@/lib/research";
 
 export async function POST(request: NextRequest) {
@@ -26,16 +26,16 @@ export async function POST(request: NextRequest) {
       console.log("[orange-webhook] session lookup:", session?.id ?? "not found", session?.status);
 
       if (session && session.status === "pending") {
-        await updateSession(session.id, { status: "paid" });
+        await markPaid(session.id);
         console.log("[orange-webhook] marked paid, starting research for", session.id);
 
         try {
           const html = await generateResearch(session.params);
-          await updateSession(session.id, { status: "complete", result_html: html });
+          await markComplete(session.id, html);
           console.log("[orange-webhook] research complete for", session.id);
         } catch (e) {
           console.error("[orange-webhook] research failed:", e);
-          await updateSession(session.id, { status: "failed" });
+          await markFailed(session.id);
         }
       }
     } catch (e) {
