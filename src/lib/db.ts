@@ -1,10 +1,5 @@
-import { Redis } from "@upstash/redis";
+import { put, list, del } from "@vercel/blob";
 import type { ResearchParams } from "./research";
-
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
 
 export interface Session {
   id: string;
@@ -14,8 +9,13 @@ export interface Session {
   created_at: number;
 }
 
-const TTL = 60 * 60 * 24 * 7; // 7 days
-const PENDING_QUEUE = "xray:pending_sessions";
+async function putJson(pathname: string, data: unknown): Promise<void> {
+  await put(pathname, JSON.stringify(data), {
+    access: "public",
+    addRandomSuffix: false,
+    contentType: "application/json",
+  });
+}
 
 export async function createSession(
   id: string,
@@ -27,12 +27,18 @@ export async function createSession(
     status: "pending",
     created_at: Date.now(),
   };
-  await redis.set(`xray:session:${id}`, session, { ex: TTL });
-  await redis.zadd(PENDING_QUEUE, { score: Date.now(), member: id });
+  // Store session data
+  await putJson(`sessions/${id}.json`, session);
+  // Add to pending queue (sorted by timestamp via filename)
+  await putJson(`pending/${session.created_at}_${id}`, id);
 }
 
 export async function getSession(id: string): Promise<Session | null> {
-  return redis.get<Session>(`xray:session:${id}`);
+  const { blobs } = await list({ prefix: `sessions/${id}.json` });
+  if (!blobs.length) return null;
+  const res = await fetch(blobs[0].url);
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function updateSession(
@@ -41,18 +47,21 @@ export async function updateSession(
 ): Promise<void> {
   const session = await getSession(id);
   if (!session) return;
-  await redis.set(
-    `xray:session:${id}`,
-    { ...session, ...updates },
-    { ex: TTL }
-  );
+  await putJson(`sessions/${id}.json`, { ...session, ...updates });
 }
 
-// Pop the oldest pending session ID (FIFO). Returns null if none pending.
+// Pop the oldest pending session (FIFO). Returns null if none pending.
 export async function popOldestPending(): Promise<string | null> {
-  const results = await redis.zrange(PENDING_QUEUE, 0, 0);
-  if (!results.length) return null;
-  const id = results[0] as string;
-  await redis.zrem(PENDING_QUEUE, id);
+  const { blobs } = await list({ prefix: "pending/" });
+  if (!blobs.length) return null;
+
+  // Sort ascending by pathname (timestamp_id format → chronological order)
+  const oldest = blobs.sort((a, b) =>
+    a.pathname.localeCompare(b.pathname)
+  )[0];
+
+  const res = await fetch(oldest.url);
+  const id = (await res.text()).replace(/^"|"$/g, "").trim();
+  await del(oldest.url);
   return id;
 }
