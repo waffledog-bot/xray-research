@@ -20,19 +20,27 @@ export async function POST(request: NextRequest) {
     event.type === "payment_received" &&
     typeof event.payment_hash === "string"
   ) {
-    const session = await getSessionByPaymentHash(event.payment_hash);
+    try {
+      console.log("[orange-webhook] payment_received:", event.payment_hash);
+      const session = await getSessionByPaymentHash(event.payment_hash);
+      console.log("[orange-webhook] session lookup:", session?.id ?? "not found", session?.status);
 
-    if (session && session.status === "pending") {
-      await updateSession(session.id, { status: "paid" });
+      if (session && session.status === "pending") {
+        await updateSession(session.id, { status: "paid" });
+        console.log("[orange-webhook] marked paid, starting research for", session.id);
 
-      // Generate research synchronously — function stays alive until done
-      try {
-        const html = await generateResearch(session.params);
-        await updateSession(session.id, { status: "complete", result_html: html });
-      } catch (e) {
-        console.error("[orange-webhook] research failed:", e);
-        await updateSession(session.id, { status: "failed" });
+        try {
+          const html = await generateResearch(session.params);
+          await updateSession(session.id, { status: "complete", result_html: html });
+          console.log("[orange-webhook] research complete for", session.id);
+        } catch (e) {
+          console.error("[orange-webhook] research failed:", e);
+          await updateSession(session.id, { status: "failed" });
+        }
       }
+    } catch (e) {
+      // Log but don't 500 — orange daemon would retry, causing duplicate research
+      console.error("[orange-webhook] unexpected error:", e);
     }
   }
 
