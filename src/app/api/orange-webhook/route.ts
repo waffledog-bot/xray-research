@@ -4,8 +4,8 @@ import { generateResearch } from "@/lib/research";
 
 export async function POST(request: NextRequest) {
   const auth = request.headers.get("authorization") || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== process.env.ORANGE_WEBHOOK_SECRET) {
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (token !== process.env.ORANGE_WEBHOOK_SECRET?.trim()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
