@@ -12,5 +12,10 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ id: session.id, status: session.status });
+  return NextResponse.json({
+    id: session.id,
+    status: session.status,
+    bolt11: session.bolt11,
+    amount_sats: 1000,
+  });
 }

@@ -4,6 +4,8 @@ import type { ResearchParams } from "./research";
 export interface Session {
   id: string;
   params: ResearchParams;
+  payment_hash: string;
+  bolt11: string;
   status: "pending" | "paid" | "complete" | "failed";
   result_html?: string;
   created_at: number;
@@ -17,20 +19,10 @@ async function putJson(pathname: string, data: unknown): Promise<void> {
   });
 }
 
-export async function createSession(
-  id: string,
-  params: ResearchParams
-): Promise<void> {
-  const session: Session = {
-    id,
-    params,
-    status: "pending",
-    created_at: Date.now(),
-  };
-  // Store session data
-  await putJson(`sessions/${id}.json`, session);
-  // Add to pending queue (sorted by timestamp via filename)
-  await putJson(`pending/${session.created_at}_${id}`, id);
+export async function createSession(session: Session): Promise<void> {
+  await putJson(`sessions/${session.id}.json`, session);
+  // Reverse lookup: payment_hash → session id (for webhook correlation)
+  await putJson(`payment-hash/${session.payment_hash}`, session.id);
 }
 
 export async function getSession(id: string): Promise<Session | null> {
@@ -41,6 +33,18 @@ export async function getSession(id: string): Promise<Session | null> {
   return res.json();
 }
 
+export async function getSessionByPaymentHash(
+  paymentHash: string
+): Promise<Session | null> {
+  const { blobs } = await list({ prefix: `payment-hash/${paymentHash}` });
+  if (!blobs.length) return null;
+  const res = await fetch(blobs[0].url);
+  if (!res.ok) return null;
+  // The blob contains the session id as a JSON string
+  const id = (await res.json()) as string;
+  return getSession(id);
+}
+
 export async function updateSession(
   id: string,
   updates: Partial<Session>
@@ -48,20 +52,4 @@ export async function updateSession(
   const session = await getSession(id);
   if (!session) return;
   await putJson(`sessions/${id}.json`, { ...session, ...updates });
-}
-
-// Pop the oldest pending session (FIFO). Returns null if none pending.
-export async function popOldestPending(): Promise<string | null> {
-  const { blobs } = await list({ prefix: "pending/" });
-  if (!blobs.length) return null;
-
-  // Sort ascending by pathname (timestamp_id format → chronological order)
-  const oldest = blobs.sort((a, b) =>
-    a.pathname.localeCompare(b.pathname)
-  )[0];
-
-  const res = await fetch(oldest.url);
-  const id = (await res.text()).replace(/^"|"$/g, "").trim();
-  await del(oldest.url);
-  return id;
 }
