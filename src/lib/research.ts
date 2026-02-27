@@ -139,7 +139,7 @@ function extractText(data: Record<string, unknown>): string {
 
 export async function generateResearch(params: ResearchParams): Promise<string> {
   const { prompt, tools } = buildPrompt(params);
-  const model = process.env.XAI_MODEL || "grok-3-fast";
+  const model = process.env.XAI_MODEL || "grok-4-fast";
 
   const response = await fetch("https://api.x.ai/v1/responses", {
     method: "POST",
