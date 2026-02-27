@@ -33,7 +33,7 @@ ${citationRule}
 ${formatRule}
 
 Wrap the entire response in a <div>. Start with an <h2> summarizing what was found.`,
-        tools: [{ type: "x_search" }],
+        tools: [{ type: "live_search" }],
       };
 
     case "topic":
@@ -61,7 +61,7 @@ Structure the HTML with:
 - A summary section with tallies styled as a scoreboard
 - <h3> for each side with its tweets as blockquotes
 - A <h3> "Analysis" section at the end`,
-        tools: [{ type: "x_search" }],
+        tools: [{ type: "live_search" }],
       };
 
     case "account": {
@@ -87,8 +87,8 @@ Structure as:
 - <h3> "Overall Profile" summary at the end`,
         tools: [
           {
-            type: "x_search",
-            x_search: { allowed_x_handles: [params.handle!] },
+            type: "live_search",
+            live_search: { allowed_x_handles: [params.handle!] },
           },
         ],
       };
@@ -107,11 +107,11 @@ Structure as a <div> with <h2> for the question, detailed answer paragraphs, and
         tools: params.handle
           ? [
               {
-                type: "x_search",
-                x_search: { allowed_x_handles: [params.handle] },
+                type: "live_search",
+                live_search: { allowed_x_handles: [params.handle] },
               },
             ]
-          : [{ type: "x_search" }],
+          : [{ type: "live_search" }],
       };
 
     default:
