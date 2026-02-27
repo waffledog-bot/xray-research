@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInvoiceByPaymentHash, markPaid, markComplete, markFailed } from "@/lib/db";
-import { generateResearch, ResearchParams } from "@/lib/research";
+import { popOldestPending, updateSession } from "@/lib/db";
+import { generateResearch } from "@/lib/research";
 
 export async function POST(request: NextRequest) {
   // Verify auth token
@@ -17,25 +17,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (event.type === "payment_received" && typeof event.payment_hash === "string") {
-    const invoice = getInvoiceByPaymentHash(event.payment_hash);
+  if (event.type === "payment_received") {
+    // FIFO: claim the oldest pending research session
+    const sessionId = await popOldestPending();
+    if (sessionId) {
+      await updateSession(sessionId, { status: "paid" });
 
-    if (invoice && invoice.status === "pending") {
-      markPaid(invoice.id);
-
-      // Generate research in background after responding
-      const params = JSON.parse(invoice.params_json) as ResearchParams;
-      const invoiceId = invoice.id;
-
-      setImmediate(async () => {
+      // Generate research — Vercel functions can run up to 60s (Pro) or 10s (Hobby)
+      // Using waitUntil pattern via background promise
+      const sessionPromise = (async () => {
         try {
-          const html = await generateResearch(params);
-          markComplete(invoiceId, html);
+          const { getSession } = await import("@/lib/db");
+          const session = await getSession(sessionId);
+          if (!session) return;
+          const html = await generateResearch(session.params);
+          await updateSession(sessionId, { status: "complete", result_html: html });
         } catch (e) {
           console.error("[orange-webhook] research failed:", e);
-          markFailed(invoiceId);
+          await updateSession(sessionId, { status: "failed" });
         }
-      });
+      })();
+
+      // Return 200 quickly; research runs in background
+      // On Vercel Pro the function stays alive until the promise resolves
+      await sessionPromise;
     }
   }
 

@@ -1,91 +1,58 @@
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+import { Redis } from "@upstash/redis";
+import type { ResearchParams } from "./research";
 
-const DB_DIR = path.join(process.cwd(), "store");
-const DB_PATH = path.join(DB_DIR, "xray.db");
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
-let _db: Database.Database | null = null;
-
-export function getDb(): Database.Database {
-  if (_db) return _db;
-  fs.mkdirSync(DB_DIR, { recursive: true });
-  _db = new Database(DB_PATH);
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS invoices (
-      id TEXT PRIMARY KEY,
-      bolt11 TEXT NOT NULL,
-      payment_hash TEXT NOT NULL,
-      amount_sats INTEGER NOT NULL,
-      params_json TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      result_html TEXT,
-      created_at INTEGER NOT NULL,
-      paid_at INTEGER
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_hash ON invoices (payment_hash);
-  `);
-  return _db;
-}
-
-export interface Invoice {
+export interface Session {
   id: string;
-  bolt11: string;
-  payment_hash: string;
-  amount_sats: number;
-  params_json: string;
+  params: ResearchParams;
   status: "pending" | "paid" | "complete" | "failed";
-  result_html: string | null;
+  result_html?: string;
   created_at: number;
-  paid_at: number | null;
 }
 
-export function createInvoice(
-  invoice: Omit<Invoice, "status" | "result_html" | "paid_at">
-): void {
-  getDb()
-    .prepare(
-      `INSERT INTO invoices (id, bolt11, payment_hash, amount_sats, params_json, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-    )
-    .run(
-      invoice.id,
-      invoice.bolt11,
-      invoice.payment_hash,
-      invoice.amount_sats,
-      invoice.params_json,
-      invoice.created_at
-    );
+const TTL = 60 * 60 * 24 * 7; // 7 days
+const PENDING_QUEUE = "xray:pending_sessions";
+
+export async function createSession(
+  id: string,
+  params: ResearchParams
+): Promise<void> {
+  const session: Session = {
+    id,
+    params,
+    status: "pending",
+    created_at: Date.now(),
+  };
+  await redis.set(`xray:session:${id}`, session, { ex: TTL });
+  await redis.zadd(PENDING_QUEUE, { score: Date.now(), member: id });
 }
 
-export function getInvoice(id: string): Invoice | null {
-  return getDb()
-    .prepare("SELECT * FROM invoices WHERE id = ?")
-    .get(id) as Invoice | null;
+export async function getSession(id: string): Promise<Session | null> {
+  return redis.get<Session>(`xray:session:${id}`);
 }
 
-export function getInvoiceByPaymentHash(paymentHash: string): Invoice | null {
-  return getDb()
-    .prepare("SELECT * FROM invoices WHERE payment_hash = ?")
-    .get(paymentHash) as Invoice | null;
+export async function updateSession(
+  id: string,
+  updates: Partial<Session>
+): Promise<void> {
+  const session = await getSession(id);
+  if (!session) return;
+  await redis.set(
+    `xray:session:${id}`,
+    { ...session, ...updates },
+    { ex: TTL }
+  );
 }
 
-export function markPaid(id: string): void {
-  getDb()
-    .prepare(
-      `UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ? AND status = 'pending'`
-    )
-    .run(Math.floor(Date.now() / 1000), id);
-}
-
-export function markComplete(id: string, html: string): void {
-  getDb()
-    .prepare(`UPDATE invoices SET status = 'complete', result_html = ? WHERE id = ?`)
-    .run(html, id);
-}
-
-export function markFailed(id: string): void {
-  getDb()
-    .prepare(`UPDATE invoices SET status = 'failed' WHERE id = ?`)
-    .run(id);
+// Pop the oldest pending session ID (FIFO). Returns null if none pending.
+export async function popOldestPending(): Promise<string | null> {
+  const results = await redis.zrange(PENDING_QUEUE, 0, 0);
+  if (!results.length) return null;
+  const id = results[0] as string;
+  await redis.zrem(PENDING_QUEUE, id);
+  return id;
 }

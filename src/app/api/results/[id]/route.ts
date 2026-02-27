@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInvoice } from "@/lib/db";
+import { getSession } from "@/lib/db";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const invoice = getInvoice(id);
+  const session = await getSession(id);
 
-  if (!invoice) {
+  if (!session) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (invoice.status === "complete" && invoice.result_html) {
-    return NextResponse.json({ html: invoice.result_html, status: "complete" });
+  if (session.status === "complete" && session.result_html) {
+    return NextResponse.json({ html: session.result_html, status: "complete" });
   }
 
-  return NextResponse.json({ status: invoice.status });
+  return NextResponse.json({ status: session.status });
 }

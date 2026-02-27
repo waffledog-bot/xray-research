@@ -2,13 +2,10 @@
 
 import { use, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import QRCode from "qrcode";
 
-interface CheckoutData {
-  id: string;
-  status: string;
-  bolt11: string;
-  amount_sats: number;
-}
+const LIGHTNING_ADDRESS = "xray@breez.tips";
+const AMOUNT_SATS = 1000;
 
 export default function CheckoutPage({
   params,
@@ -17,36 +14,45 @@ export default function CheckoutPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const [data, setData] = useState<CheckoutData | null>(null);
+  const [status, setStatus] = useState<string>("pending");
   const [copied, setCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [error, setError] = useState("");
+
+  // Generate QR code for the lightning address
+  useEffect(() => {
+    QRCode.toDataURL(`lightning:${LIGHTNING_ADDRESS}`, {
+      width: 256,
+      margin: 2,
+      color: { dark: "#ffffff", light: "#111827" },
+    }).then(setQrDataUrl);
+  }, []);
 
   const poll = useCallback(async () => {
     try {
       const res = await fetch(`/api/checkout/${id}/status`);
       if (!res.ok) {
-        setError("Invoice not found");
+        setError("Session not found");
         return;
       }
-      const json: CheckoutData = await res.json();
-      setData(json);
+      const json = await res.json();
+      setStatus(json.status);
       if (json.status === "complete" || json.status === "paid") {
         router.push(`/results/${id}`);
       }
     } catch {
-      // Network error, keep trying
+      // Network error — keep trying
     }
   }, [id, router]);
 
   useEffect(() => {
     poll();
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 2500);
     return () => clearInterval(interval);
   }, [poll]);
 
-  const copyInvoice = () => {
-    if (!data?.bolt11) return;
-    navigator.clipboard.writeText(data.bolt11).then(() => {
+  const copyAddress = () => {
+    navigator.clipboard.writeText(LIGHTNING_ADDRESS).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -66,14 +72,6 @@ export default function CheckoutPage({
     );
   }
 
-  if (!data) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-4xl animate-pulse">⚡</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="max-w-md w-full">
@@ -89,47 +87,64 @@ export default function CheckoutPage({
           {/* Amount */}
           <div className="text-center">
             <div className="text-4xl font-bold text-yellow-400">
-              ⚡ {data.amount_sats.toLocaleString()}
+              ⚡ {AMOUNT_SATS.toLocaleString()}
             </div>
             <div className="text-gray-500 text-sm mt-1">sats</div>
+          </div>
+
+          {/* QR Code */}
+          {qrDataUrl && (
+            <div className="flex justify-center">
+              <div className="rounded-xl overflow-hidden border border-gray-700">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qrDataUrl}
+                  alt={`Pay to ${LIGHTNING_ADDRESS}`}
+                  width={220}
+                  height={220}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Lightning Address */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">
+              Lightning Address
+            </label>
+            <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+              <span className="text-gray-200 font-mono text-sm">
+                {LIGHTNING_ADDRESS}
+              </span>
+              <button
+                onClick={copyAddress}
+                className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
+              >
+                {copied ? "✓ Copied" : "Copy"}
+              </button>
+            </div>
           </div>
 
           {/* Status indicator */}
           <div className="flex items-center justify-center gap-2 text-sm">
             <span className="inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
-            <span className="text-gray-400">Waiting for payment…</span>
+            <span className="text-gray-400">
+              {status === "pending"
+                ? "Waiting for payment…"
+                : "Payment received — generating report…"}
+            </span>
           </div>
 
-          {/* Invoice */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wider">
-              Lightning Invoice
-            </label>
-            <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
-              <p className="text-xs text-gray-400 font-mono break-all leading-relaxed">
-                {data.bolt11}
-              </p>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="space-y-3">
-            <a
-              href={`lightning:${data.bolt11}`}
-              className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors text-center"
-            >
-              ⚡ Open in Wallet
-            </a>
-            <button
-              onClick={copyInvoice}
-              className="w-full bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold py-3 px-6 rounded-lg transition-colors"
-            >
-              {copied ? "✓ Copied!" : "Copy Invoice"}
-            </button>
-          </div>
+          {/* Wallet button */}
+          <a
+            href={`lightning:${LIGHTNING_ADDRESS}`}
+            className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors text-center"
+          >
+            ⚡ Open in Wallet
+          </a>
 
           <p className="text-center text-xs text-gray-600">
-            This page will update automatically once payment is received
+            Send exactly {AMOUNT_SATS.toLocaleString()} sats. Page updates automatically after payment.
           </p>
         </div>
 
