@@ -18,6 +18,9 @@ function buildPrompt(params: ResearchParams): {
   const formatRule =
     "Format your response as clean HTML. Use <h2>, <h3>, <p>, <ul>, <li>, <a> tags. Make tweet links clickable with target='_blank'. Style tweet citations as blockquotes with the tweet URL linked.";
 
+  const xSearch = { type: "x_search" };
+  const webSearch = { type: "web_search" };
+
   switch (params.mode) {
     case "search":
       return {
@@ -33,7 +36,7 @@ ${citationRule}
 ${formatRule}
 
 Wrap the entire response in a <div>. Start with an <h2> summarizing what was found.`,
-        tools: [{ type: "live_search" }],
+        tools: [xSearch, webSearch],
       };
 
     case "topic":
@@ -61,7 +64,7 @@ Structure the HTML with:
 - A summary section with tallies styled as a scoreboard
 - <h3> for each side with its tweets as blockquotes
 - A <h3> "Analysis" section at the end`,
-        tools: [{ type: "live_search" }],
+        tools: [xSearch, webSearch],
       };
 
     case "account": {
@@ -85,12 +88,7 @@ Structure as:
 - <h2> with the account name
 - <h3> for each topic with stance summary and evidence tweets as blockquotes
 - <h3> "Overall Profile" summary at the end`,
-        tools: [
-          {
-            type: "live_search",
-            live_search: { allowed_x_handles: [params.handle!] },
-          },
-        ],
+        tools: [xSearch, webSearch],
       };
     }
 
@@ -104,14 +102,7 @@ ${citationRule}
 ${formatRule}
 
 Structure as a <div> with <h2> for the question, detailed answer paragraphs, and tweet citations as blockquotes.`,
-        tools: params.handle
-          ? [
-              {
-                type: "live_search",
-                live_search: { allowed_x_handles: [params.handle] },
-              },
-            ]
-          : [{ type: "live_search" }],
+        tools: [xSearch, webSearch],
       };
 
     default:
@@ -119,18 +110,46 @@ Structure as a <div> with <h2> for the question, detailed answer paragraphs, and
   }
 }
 
+// Extract text from xAI Responses API output
+// Response shape: { output: Array<{type, role, content: Array<{type, text}>}> }
+function extractText(data: Record<string, unknown>): string {
+  // Try output array (Responses API format)
+  const output = data.output as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (item.type === "message") {
+        const content = item.content as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(content)) {
+          for (const c of content) {
+            if (c.type === "output_text" && typeof c.text === "string") {
+              return c.text;
+            }
+          }
+        }
+      }
+    }
+  }
+  // Fallback: try chat completions format
+  const choices = data.choices as Array<{message: {content: string}}> | undefined;
+  if (Array.isArray(choices) && choices[0]?.message?.content) {
+    return choices[0].message.content;
+  }
+  return "No results found.";
+}
+
 export async function generateResearch(params: ResearchParams): Promise<string> {
   const { prompt, tools } = buildPrompt(params);
+  const model = process.env.XAI_MODEL || "grok-3-fast";
 
-  const response = await fetch("https://api.x.ai/v1/chat/completions", {
+  const response = await fetch("https://api.x.ai/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.XAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "grok-4-1-fast",
-      messages: [{ role: "user", content: prompt }],
+      model,
+      input: [{ role: "user", content: prompt }],
       tools,
     }),
   });
@@ -141,5 +160,5 @@ export async function generateResearch(params: ResearchParams): Promise<string> 
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "No results found.";
+  return extractText(data as Record<string, unknown>);
 }
